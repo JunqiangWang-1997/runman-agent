@@ -2796,10 +2796,13 @@ elif [ "$VIRT_TYPE" = "podman" ]; then
 
 if podman network exists "$PODMAN_NETWORK" 2>/dev/null; then
     log "$(t "Podman network $PODMAN_NETWORK already exists, skipping." "Podman 网络 $PODMAN_NETWORK 已存在，跳过创建。")"
+    # 确保已有网络禁用内部 DNS 代理，容器直接使用设置的 1.1.1.1 公网 DNS
+    sed -i 's/"dns_enabled": true/"dns_enabled": false/' "/etc/containers/networks/${PODMAN_NETWORK}.json" 2>/dev/null || true
 elif [ "$IPV6_MODE" = "none" ]; then
     log "$(t "Creating Podman network (IPv4 only)..." "创建 Podman 网络（仅 IPv4）...")"
     podman network create \
         --driver=bridge \
+        --disable-dns \
         --subnet=10.91.0.0/20 \
         --gateway=10.91.0.1 \
         "$PODMAN_NETWORK"
@@ -2808,6 +2811,7 @@ elif [ "$IPV6_MODE" = "snat" ]; then
     log "$(t "Creating Podman network (ULA IPv6, SNAT)..." "创建 Podman 网络（ULA IPv6，SNAT 模式）...")"
     podman network create \
         --driver=bridge \
+        --disable-dns \
         --subnet=10.91.0.0/20 \
         --gateway=10.91.0.1 \
         --ipv6 \
@@ -2837,6 +2841,7 @@ PYEOF
 
     podman network create \
         --driver=bridge \
+        --disable-dns \
         --subnet=10.91.0.0/20 --gateway=10.91.0.1 \
         --ipv6 \
         --subnet="${CONTAINER_BASE}/112" --gateway="$CONTAINER_GW" \
@@ -2882,12 +2887,6 @@ start_service podman-restart
             || { log "$(t "Pulling $image..." "拉取 $image...")"; podman pull "$image" \
                 || log "$(t "Warning: failed to pull $image" "警告: $image 拉取失败")"; }
     done
-
-    # Ensure aardvark-dns daemon stays active for all containers on narwhal-net
-    if ! podman ps -a --format '{{.Names}}' | grep -q "^narwhal-dns-keepalive$"; then
-        podman run -d --name narwhal-dns-keepalive --restart always --network "$PODMAN_NETWORK" docker.io/narwhalcloud/alpine:podman sleep infinity 2>/dev/null \
-            || podman run -d --name narwhal-dns-keepalive --restart always --network "$PODMAN_NETWORK" alpine sleep infinity 2>/dev/null || true
-    fi
 fi  # End of Podman vs cloud-hypervisor network setup
 
 # ── Cloud-hypervisor specific setup ────────────────────────────────────────────
