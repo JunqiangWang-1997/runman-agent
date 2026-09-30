@@ -702,7 +702,7 @@ install_packages() {
     elif [ "$virt_type" = "incus" ]; then
         extra_packages="incus uidmap acl bridge-utils"
     else
-        extra_packages="podman lxcfs xfsprogs"
+        extra_packages="podman aardvark-dns lxcfs xfsprogs"
     fi
 
     while [ $attempt -le $max ]; do
@@ -2378,6 +2378,9 @@ if systemctl is-active --quiet "$AGENT_SERVICE" 2>/dev/null || [ -f "$AGENT_BINA
             mv /usr/libexec/podman/netavark.new /usr/libexec/podman/netavark
             log "$(t "✓ Custom netavark updated." "✓ 自定义 netavark 已更新。")"
         fi
+        if [ -f "/usr/lib/podman/aardvark-dns" ] && [ ! -f "/usr/libexec/podman/aardvark-dns" ]; then
+            ln -sf /usr/lib/podman/aardvark-dns /usr/libexec/podman/aardvark-dns
+        fi
     fi
 
     if systemctl is-active --quiet "$AGENT_SERVICE" 2>/dev/null; then
@@ -2786,6 +2789,10 @@ elif [ "$VIRT_TYPE" = "podman" ]; then
     else
         log "$(t "Warning: netavark download failed, using system default." "警告: netavark 下载失败，使用系统默认版本。")"
     fi
+    # 确保 netavark 能找到 aardvark-dns（Debian 默认安装在 /usr/lib/podman 下）
+    if [ -f "/usr/lib/podman/aardvark-dns" ] && [ ! -f "/usr/libexec/podman/aardvark-dns" ]; then
+        ln -sf /usr/lib/podman/aardvark-dns /usr/libexec/podman/aardvark-dns
+    fi
 
 if podman network exists "$PODMAN_NETWORK" 2>/dev/null; then
     log "$(t "Podman network $PODMAN_NETWORK already exists, skipping." "Podman 网络 $PODMAN_NETWORK 已存在，跳过创建。")"
@@ -2875,6 +2882,12 @@ start_service podman-restart
             || { log "$(t "Pulling $image..." "拉取 $image...")"; podman pull "$image" \
                 || log "$(t "Warning: failed to pull $image" "警告: $image 拉取失败")"; }
     done
+
+    # Ensure aardvark-dns daemon stays active for all containers on narwhal-net
+    if ! podman ps -a --format '{{.Names}}' | grep -q "^narwhal-dns-keepalive$"; then
+        podman run -d --name narwhal-dns-keepalive --restart always --network "$PODMAN_NETWORK" docker.io/narwhalcloud/alpine:podman sleep infinity 2>/dev/null \
+            || podman run -d --name narwhal-dns-keepalive --restart always --network "$PODMAN_NETWORK" alpine sleep infinity 2>/dev/null || true
+    fi
 fi  # End of Podman vs cloud-hypervisor network setup
 
 # ── Cloud-hypervisor specific setup ────────────────────────────────────────────
